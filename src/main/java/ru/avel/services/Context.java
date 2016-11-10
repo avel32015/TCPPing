@@ -37,7 +37,7 @@ public class Context implements Runnable {
 	public Context(ASelectorService service, SelectionKey key) {
 		super();
 		this.service = service;
-		logger = service.getLogger().newLogger("Context-"+ ++COUNTER);
+		logger = service.logger().newLogger("Context-"+ ++COUNTER);
 		selectionKey(key);
 		logger.logDebug("Channel context created: " +  socketString());
 	}
@@ -66,11 +66,8 @@ public class Context implements Runnable {
 		else server = (ServerSocketChannel) key.channel(); 
 	}
 
-	public boolean reading() {
-		return reading;
-	}
-	public boolean writing() {
-		return writing;
+	public Message  readMessage() {
+		return readMessage;
 	}
 	
 	public void readMessage(Message message) {
@@ -80,6 +77,10 @@ public class Context implements Runnable {
 		}
 		key.interestOps( key.interestOps() | SelectionKey.OP_READ );
 		service.nowSelect();
+	}
+	
+	public Message writeMessage() {
+		return writeMessage;
 	}
 	
 	public void writeMessage(Message message) {
@@ -103,18 +104,18 @@ public class Context implements Runnable {
 		running = true;
 		try {
 			if (logger.isDebug()) logger.logDebug( debugSelectionKey() );
-			boolean ok = false;
-			if ( key.isValid() ) {
+			boolean ok;
+			if ( ok = key.isValid() ) {
 				selectOps = 0;
 				try {
 					if ( key.isAcceptable() ) accept();
 					if ( key.isConnectable() ) connect();
-					if ( key.isReadable() ) read();
+					if ( key.isReadable() ) ok = read();
 					if ( key.isWritable() ) write();
 					if ( selectOps != 0 ) key.interestOps( key.interestOps() | selectOps ); 
-					ok = true;
 				} catch(Exception e) {
 					logger.logError("Channel failed", e);
+					ok = false;
 				}
 			}
 			if ( !ok ) close();
@@ -157,25 +158,24 @@ public class Context implements Runnable {
 	
 	private void connect() throws IOException {
 		if ( channel.finishConnect() ) {
-			logger.logInfo("Channel opened: " + socketString());
+			logger.logDebug("Channel opened: " + socketString());
 			service.onConnect( this );
 		}
 	}
 	
-	private void read() throws IOException {
+	private boolean read() throws IOException {
 		if ( readMessage == null ) {
 			logger.logWarn("Message for read is undefined", null);
-			return;
+			return true;
 		}
 		
 		for(;;) {
 			readBuffer = checkBuffer( readBuffer, readMessage.length() );
-			if ( !reading ) readBuffer.clear(); 
-			reading = true;
-			if ( channel.read( readBuffer ) == 0 ) {
-				selectOps |= SelectionKey.OP_READ;
-				return;
-			}
+			if ( !reading ) { readBuffer.clear(); reading = true; }
+			int r = channel.read( readBuffer );
+			if ( r < 0 ) { logger.logDebug("Channel has reached end-of-stream"); return false; }
+			if ( r == 0 ) { selectOps |= SelectionKey.OP_READ; return true; }
+			
 			readBuffer.flip();
 			try {
 				if ( readMessage.read( readBuffer ) ) break;
@@ -190,6 +190,7 @@ public class Context implements Runnable {
 		Message m = readMessage;
 		readMessage = null;
 		service.onRead( this, m );
+		return true;
 	}
 	
 	private void write() throws IOException {
@@ -222,16 +223,18 @@ public class Context implements Runnable {
 		if ( length > 0 ) {
 			if ( buf == null ) buf = ByteBuffer.allocate( length );
 			else if ( buf.capacity() < length ) buf = ByteBuffer.allocate( length ).put( (ByteBuffer) buf.rewind() );
-			else if ( buf.limit() < length ) buf.limit( length );
+			else buf.limit( length );
 		} else {
 			if ( buf == null ) buf = ByteBuffer.allocate( BUFFER_SIZE );
 			else if ( buf.position() == buf.capacity() ) buf = ByteBuffer.allocate( buf.capacity() + BUFFER_SIZE ).put( (ByteBuffer) buf.rewind() );
-			else if ( buf.limit() < buf.capacity() ) buf.limit( buf.capacity() );
+			else buf.limit( buf.capacity() );
 		}
 		return buf;
 	}
 	
 	public void close() {
+		service.onClose( this );
+		
 		if ( key == null ) return;
 		Channel ch = key.channel();
 		key.cancel();
@@ -239,7 +242,7 @@ public class Context implements Runnable {
 		key = null;
 		if ( ch == null ) return;
 		
-		logger.logInfo("Channel closed: " + socketString());
+		logger.logDebug("Channel closed: " + socketString());
 		try {
 			ch.close();
 		} catch (IOException e) {

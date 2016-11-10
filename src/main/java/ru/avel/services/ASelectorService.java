@@ -12,9 +12,11 @@ import ru.avel.services.helpers.Logger;
 public class ASelectorService extends AbstractService {
 
 	private Selector selector;
-	private long timeout = 1000;
+
+	@Property
+	private Long timeout = 1000L;
 	
-	//private MessageProvider provider; 
+	private MessagePool messages = new MessagePool(); 
 
 	private volatile boolean selecting;
 	
@@ -27,33 +29,33 @@ public class ASelectorService extends AbstractService {
 		int s = 0;
 		selecting = true;
 		try {
-			s = getSelector().select( getTimeout() );
+			s = selector().select( timeout() );
 		} catch (IOException e) {
 			throw new ServiceException("Selecting failure ", e);
 		} finally {
 			selecting = false;
 		}
-		getLogger().logDebug("Selecting keys: " + s);
 		if ( s == 0 ) return;
+		logger().logDebug("Selecting keys: " + s);
 		
 		Iterator<SelectionKey> it = selector.selectedKeys().iterator();
 		while ( it.hasNext() ) {
 			SelectionKey key = it.next();
 			Context ctx = (Context) key.attachment();
-			if ( ctx != null ) ctx.process( getExecutor() ); 
+			if ( ctx != null ) ctx.process( executor() ); 
 			it.remove();
 		}
 	}
 	
 	@Override
 	public void stop() throws ServiceException {
-		setStatus(Status.STOPPING);
+		status(Status.STOPPING);
 		
 		if ( selector != null ) {
 			for ( SelectionKey key: selector.keys() ) {
 				key.cancel();
 				Context ctx = (Context) key.attachment();
-				if (ctx != null ) ctx.process( getExecutor() );
+				if (ctx != null ) ctx.process( executor() );
 			}
 		}
 		
@@ -67,7 +69,7 @@ public class ASelectorService extends AbstractService {
 	
 	public Context register(SelectableChannel channel, int ops) throws IOException {
 		channel.configureBlocking(false);
-		SelectionKey key = channel.register( getSelector(), ops );
+		SelectionKey key = channel.register( selector(), ops );
 		Object obj = key.attachment();
 		Context ctx = obj instanceof Context ? (Context) obj : new Context( this, key );   
 		return ctx;
@@ -81,43 +83,44 @@ public class ASelectorService extends AbstractService {
 		if ( selector != null && selecting ) selector.wakeup();
 	}
 
-	protected void onConnect(Context ctx) {
-		getLogger().logDebug("Connection established");
-		//if ( getProvider() != null ) ctx.readMessage( getProvider().create() );
-	}
-	
-	protected void onRead(Context ctx, Message msg) {
-		getLogger().logDebug("Reading message is complete");
-		msg.clear();
-		ctx.readMessage( msg );
-	}
-	
-	protected void onWrite(Context ctx, Message msg) {
-		getLogger().logDebug("Writing message is complete");
-	}
-
-	/*
-	public MessageProvider getProvider() {
-		return provider;
-	}
-	
-	public void setProvider(MessageProvider provider) {
-		this.provider = provider;
-	}
-	*/
-	
-	public Selector getSelector() throws IOException {
+	public Selector selector() throws IOException {
 		if ( selector == null ) selector = Selector.open();
 		return selector;
 	}
-
-	public long getTimeout() {
+	
+	public long timeout() {
 		return timeout;
 	}
 	
-	public void setTimeout(long value) {
+	public void timeout(long value) {
 		timeout = value;
 	}
 	
+	public MessagePool messages() {
+		return messages;
+	}
+	
+	protected void onConnect(Context ctx) {
+		logger().logDebug("Connection established");
+		ctx.readMessage( messages().acquire() );
+	}
+	
+	protected void onClose(Context ctx) {
+		logger().logDebug("Connection finished");
+		
+		messages().release( ctx.readMessage() );
+		messages().release( ctx.writeMessage() );
+		
+	}
+	
+	protected void onRead(Context ctx, Message msg) {
+		if ( logger().isDebug() ) logger().logDebug("Reading message is complete:\n" + msg.toString());
+		ctx.readMessage( messages().acquire() );
+	}
+	
+	protected void onWrite(Context ctx, Message msg) {
+		if ( logger().isDebug() ) logger().logDebug("Writing message is complete:\n" + msg.toString());
+		messages().release( msg );
+	}
 	
 }

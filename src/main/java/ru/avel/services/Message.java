@@ -1,6 +1,7 @@
 package ru.avel.services;
 
 import java.io.Serializable;
+import java.nio.BufferOverflowException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 
@@ -37,6 +38,11 @@ public class Message implements Serializable {
 		return this;
 	}
 
+	public void generate(int length) {
+		clear();
+		length(length);
+	}
+	
 	/**
 	 * Метод <b>read(buffer)</b> читаете значения атрибутов объекта из буфера.
 	 * @param buffer Позиция буфера определяет начало чтения значений и после завершения чтения должна определять конец значений.
@@ -44,6 +50,7 @@ public class Message implements Serializable {
 	 * @throws MessageException возникает в случае неверного формата данных.
 	 */
 	public boolean read(ByteBuffer buffer) throws MessageException {
+		clear();
 		int i;
 		try {
 			if ( LABEL != 0 && ( i = buffer.getInt() ) != LABEL ) throw new MessageException("Label of message incorrect: 0x" + Integer.toHexString(i) );
@@ -65,7 +72,7 @@ public class Message implements Serializable {
 		try {
 			if ( LABEL != 0 ) buffer.putInt( LABEL );
 			buffer.putInt( length() );
-		} catch(BufferUnderflowException e) {
+		} catch(BufferOverflowException e) {
 			return false;
 		}
 		return true;

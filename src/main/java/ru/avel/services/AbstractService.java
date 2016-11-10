@@ -5,8 +5,8 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.Future;
@@ -51,59 +51,59 @@ public abstract class AbstractService implements Service {
 	
 	public AbstractService(String id, Logger logger, Properties props) {
 		super();
-		setId(id);
-		setLogger(logger);
-		setStatus(Status.STOPPED);
-		setProperties(props);
+		id(id);
+		logger(logger);
+		status(Status.STOPPED);
+		properties(props);
 	}
 
-	public String getId() {
+	public String id() {
 		return id;
 	}
 
-	public void setId(String id) {
+	public void id(String id) {
 		this.id = id == null ? getClass().getSimpleName() : id;
 	}
 
 	@Override
-	public Status getStatus() {
+	public Status status() {
 		return status;
 	}
 
 	@Override
-	public void setStatus(Status status) {
-		if (this.status != status) getLogger().logDebug("Status: " + status);
+	public void status(Status status) {
+		if (this.status != status) logger().logDebug("Status: " + status);
 		this.status = status;
 	}
 	
 	@Override
-	public Exception getFailure() {
+	public Exception failure() {
 		return cause;
 	}
 
 	@Override
-	public void setFailure(Exception cause) {
+	public void failure(Exception cause) {
 		if ( (this.cause = cause) == null ) return;
-		setStatus(Status.STOPPED);
-		getLogger().logError("Service failure", cause);
+		status(Status.STOPPED);
+		logger().logError("Service failure", cause);
 	}
 	
 
-	public Logger getLogger() {
+	public Logger logger() {
 		if (logger == null) logger = new Logger();
 		return logger;
 	}
 
-	public void setLogger(Logger logger) {
-		if (logger != null) this.logger = logger.newLogger("SERVICE: " + getId());
+	public void logger(Logger logger) {
+		if (logger != null) this.logger = logger.newLogger("SERVICE: " + id());
 		else this.logger = logger;
 	}
 
-	public Properties getProperties() {
+	public Properties properties() {
 		return props;
 	}
 
-	public void setProperties(Properties props) {
+	public void properties(Properties props) {
 		this.props = props;
 		applyProperties();
 	}
@@ -114,13 +114,14 @@ public abstract class AbstractService implements Service {
 	protected void applyProperties() {
 		if (props == null) return; 
 		String v;
-		Constructor<?> c;
+		Method m;
 		
 		for ( Field f : this.getClass().getDeclaredFields() ) {
 			if ( f.isAnnotationPresent(Property.class) ) {
+				Class<?> t = f.getType();
 				// ѕолучить конструктор класса дл€ типа пол€ 
 				try {
-					c = f.getType().getConstructor( String.class );
+					m = t.getMethod("valueOf", t.equals( String.class ) ? Object.class : String.class );
 				} catch (Exception e) {
 					continue;
 				}
@@ -129,13 +130,13 @@ public abstract class AbstractService implements Service {
 				
 				try {
 					f.setAccessible(true);
-					f.set( this, c.newInstance( v ) );
+					f.set( this, m.invoke( t, v ) );
 				} catch (Exception e) {
 					continue;
 				} finally {
 					f.setAccessible(false);
 				}
-				getLogger().logDebug("Property value: " + f.getName() + "=" + v); 
+				logger().logDebug("Property value: " + f.getName() + "=" + v); 
 			}
 		}
 		
@@ -145,38 +146,40 @@ public abstract class AbstractService implements Service {
 		if (props == null || name == null || name.isEmpty()) return null;
 		Set<String> names = props.stringPropertyNames();
 		String key = null;
-		if ( !getId().isEmpty() && names.contains( key = getId() + "." + name ) ) ; 
+		if ( !id().isEmpty() && names.contains( key = id() + "." + name ) ) ; 
 		else if ( names.contains( key = this.getClass().getName() + "." + name ) ) ; 
 		else if ( names.contains( key = name ) ) ; 
 		else return null;
 		return props.getProperty(key);
 	}
 	
-	protected void checkStatus(boolean valid, Status... statuses) throws ServiceException {
+	protected void check(boolean valid, Status... statuses) throws ServiceException {
 		boolean b = false;
-		Status s = getStatus();
+		Status s = status();
 		for( int i = 0; i < statuses.length && !b; i++ ) b = s == statuses[i];
-		if ( valid ^ b ) throw new ServiceException("Service [" + getId() + "] has invalid status: " + s);
+		if ( valid ^ b ) throw new ServiceException("Service [" + id() + "] has invalid status: " + s);
 	}
 	
+	@Override
 	public void start() throws ServiceException {
-		checkStatus(false, Status.STARTED);
-		setFailure(null);
-		setStatus(Status.STARTING);
+		check(false, Status.STARTED);
+		failure(null);
+		status(Status.STARTING);
 		task.start();
-		setStatus(Status.STARTED);
+		status(Status.STARTED);
 	}
 
+	@Override
 	public void stop() throws ServiceException {
-		setStatus(Status.STOPPED);
+		status(Status.STOPPED);
 		task.stop();
 	}
 
-	public ScheduledExecutorService getExecutor() {
+	public ScheduledExecutorService executor() {
 		return executor;
 	}
 
-	public void setExecutor(ScheduledExecutorService executor) {
+	public void executor(ScheduledExecutorService executor) {
 		this.executor = executor;
 	}
 
@@ -189,8 +192,8 @@ public abstract class AbstractService implements Service {
 		void start() {
 			stop();
 			future = null;
-			if ( getExecutor() == null ) logger.logWarn("Executor is undefined", null);
-			else future = getExecutor().scheduleWithFixedDelay( this, TASK_DELAY, TASK_DELAY, TimeUnit.MILLISECONDS);
+			if ( executor() == null ) logger.logWarn("Executor is undefined", null);
+			else future = executor().scheduleWithFixedDelay( this, TASK_DELAY, TASK_DELAY, TimeUnit.MILLISECONDS);
 		}
 		
 		void stop() {
@@ -199,12 +202,12 @@ public abstract class AbstractService implements Service {
 		
 		@Override
 		public void run() {
-			if ( getStatus() == Status.STOPPED ) future.cancel(false);
-			else if ( getStatus() == Status.STARTED ) {
+			if ( status() == Status.STOPPED ) future.cancel(false);
+			else if ( status() == Status.STARTED ) {
 				try {
 					process();
 				} catch (Exception e) {
-					setFailure(e);
+					failure(e);
 				}
 			}
 		}

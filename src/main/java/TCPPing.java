@@ -4,8 +4,9 @@ import java.util.Properties;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 import ru.avel.examples.ping.*;
-import ru.avel.services.AbstractService;
+import ru.avel.services.ASelectorService;
 import ru.avel.services.Service;
+import ru.avel.services.Service.Status;
 import ru.avel.services.ServiceException;
 import ru.avel.services.helpers.Logger;
 
@@ -14,6 +15,7 @@ public class TCPPing {
 	private Logger logger;
 	private Properties props;
 	private Service service;
+	private ScheduledThreadPoolExecutor executor;
 
 	public TCPPing() {
 		super();
@@ -62,9 +64,14 @@ public class TCPPing {
 					num = Integer.valueOf(args[ i ]);
 					valid = 50 <= num && num <= 3000;
 					props.setProperty( "size", Integer.toString(num) );
-				} else 
+				} else
+				if ( arg.equals("-num") && (valid = (++i < args.length)) ) {
+					num = Integer.valueOf(args[ i ]);
+					valid = 0 < num;
+					props.setProperty( "num", Integer.toString(num) );
+				} else
 				if ( i == args.length - 1 && !arg.startsWith("-") ) {
-					props.setProperty( "hostname", arg );
+					props.setProperty( "host", arg );
 				} else {
 					valid = false;
 				}
@@ -75,50 +82,45 @@ public class TCPPing {
 		return valid ? -1 : i;
 	}
 	
-	void defaultProperties() {
+	protected void defaultProperties() {
+		if ( !props.containsKey("host") ) props.setProperty("host", "");
 		if ( !props.containsKey("port") ) props.setProperty("port", "9900");
 		if ( !props.containsKey("mps") ) props.setProperty("mps", "1");
 		if ( !props.containsKey("size") ) props.setProperty("size", "300");
+		if ( !props.containsKey("num") ) props.setProperty("num", "10");
 	}
 	
 	
-	Service createService() throws ServiceException {
-		
+	protected Service createService() throws ServiceException, NoSuchMethodException {
 		String mode = props.getProperty("mode");
-		if ( mode == null ) mode = props.containsKey("hostname") ? "pitcher" : "catcher";
+		if ( mode == null ) mode = props.getOrDefault("host", "").equals("") ? "catcher" : "pitcher";
 		
-		AbstractService srv = null;
+		ASelectorService srv = null;
 		if ( mode.equals("pitcher") ) srv = new Pitcher( null, logger, props ); else 
 		if ( mode.equals("catcher") ) srv = new Catcher( null, logger, props );
 		if ( srv != null ) {
+			srv.messages().supplier( () -> new PingMessage() );
 			
-			srv.setExecutor( new ScheduledThreadPoolExecutor( 2 ) );
-			
-			/*
-			svc.setProvider( new MessageProvider() {
-				public PingMessage create() {
-					return new PingMessage(); 
-				};
-			});
-			*/
+			srv.executor( executor = new ScheduledThreadPoolExecutor( 2 ) );
+			//executor.setCorePoolSize( mode.equals("pitcher") ? 1 : 2 );
+			//executor.setMaximumPoolSize( mode.equals("pitcher") ? 2 : 10 );
 		}
-		
 		return srv;
 	}
 	
 	public void run() throws Exception {
-		getLogger().logInfo("Application running");
-		getLogger().logInfo( printProps() );
+		getLogger().logDebug("Application running");
+		getLogger().logDebug( printProps() );
 	
 		if (service == null) service = createService(); 
 		if (service != null) service.start();
 		
 		BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 		try {
-			while (!Thread.interrupted()) {
+			while ( !Thread.interrupted() && service.status() == Status.STARTED ) {
 				try {
 					Thread.sleep(500);
-					if ( "exit".equalsIgnoreCase( br.readLine () ) ) break;
+					if ( br.ready() && "exit".equalsIgnoreCase( br.readLine () ) ) break;
 				} catch (InterruptedException e) {
 					break;
 				}
@@ -138,7 +140,8 @@ public class TCPPing {
 		} finally {
 			service = null;
 		}
-		getLogger().logInfo("Application finished");
+		if ( executor != null ) executor.shutdownNow(); executor = null;
+		getLogger().logDebug("Application finished");
 	}
 
 	public static void main(String[] args) {
@@ -152,7 +155,7 @@ public class TCPPing {
 		
 		try {
 			app.run();
-			app.getLogger().logInfo("Application exiting normally.");
+			app.getLogger().logDebug("Application exiting normally.");
 		} catch (Exception e) {
 			app.getLogger().logError("Application Error: ", e);
 		} finally {
@@ -171,6 +174,7 @@ public class TCPPing {
 			 + "               -port <port>          TCP socket port used for connecting. Default 9900 \n"
 			 + "               -mps <rate>           The speed of message sending expressed as \"messages per second\". Default: 1 \n"
 			 + "               -size <size>          Message length. Default 300, min 50, max 3000 \n"
+			 + "               -num <number>         Amount of messages. Default 10, min 0 - no limit\n"
 			 + "    <hostname>    For Pitcher mode only. The name of the computer witch runs Catcher \n"
 		;
 	}

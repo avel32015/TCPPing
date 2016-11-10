@@ -5,6 +5,7 @@ import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.ServerSocketChannel;
 import java.util.Properties;
+
 import ru.avel.services.ASelectorService;
 import ru.avel.services.Context;
 import ru.avel.services.Message;
@@ -32,30 +33,30 @@ public class Catcher extends ASelectorService {
 		super(id, logger, props);
 	}
 
-	public String getBind() {
+	public String bind() {
 		return bind;
 	}
 
-	public void setBind(String bind) {
+	public void bind(String bind) {
 		this.bind = bind;
 	}
 
-	public int getPort() {
+	public int port() {
 		return port;
 	}
 
-	public void setPort(int port) {
+	public void port(int port) {
 		this.port = port;
 	}
 	
 	@Override
 	public void start() throws ServiceException {
-		checkStatus(false, Status.STARTED);
-		setStatus(Status.STARTING);
+		check(false, Status.STARTED);
+		status(Status.STARTING);
 
 		InetSocketAddress addr = null;
-		if (getBind() == null) addr = new InetSocketAddress( getPort() );
-		else addr = new InetSocketAddress( getBind(), getPort() );
+		if (bind() == null) addr = new InetSocketAddress( port() );
+		else addr = new InetSocketAddress( bind(), port() );
 		
 		ServerSocketChannel ch = null;
 		try {
@@ -63,7 +64,7 @@ public class Catcher extends ASelectorService {
 			register( ch, SelectionKey.OP_ACCEPT);
 		} catch (IOException e) {
 			ServiceException se = new ServiceException("Server socket not opened", e); 
-			setFailure( se );
+			failure( se );
 			try {
 				if ( ch != null ) ch.close();
 			} catch (IOException e1) { }
@@ -74,25 +75,8 @@ public class Catcher extends ASelectorService {
 	}
 
 	@Override
-	protected void onConnect(Context ctx) {
-		super.onConnect(ctx);
-		ctx.readMessage( new PingMessage() );
-	}
-	
-	@Override
 	protected void onRead(Context ctx, Message msg) {
-		getLogger().logDebug("Reading message is complete");
+		super.onRead(ctx, msg);
 		ctx.writeMessage( msg );
 	}
-	
-	@Override
-	protected void onWrite(Context ctx, Message msg) {
-		getLogger().logDebug("Writing message is complete");
-		
-		msg.clear();
-		ctx.readMessage( msg );
-	}
-
-	
-	
 }
