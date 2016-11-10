@@ -1,9 +1,10 @@
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.Properties;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+
 import ru.avel.examples.ping.*;
-import ru.avel.services.ASelectorService;
-import ru.avel.services.MessageProvider;
+import ru.avel.services.AbstractService;
 import ru.avel.services.Service;
 import ru.avel.services.ServiceException;
 import ru.avel.services.helpers.Logger;
@@ -86,18 +87,23 @@ public class TCPPing {
 		String mode = props.getProperty("mode");
 		if ( mode == null ) mode = props.containsKey("hostname") ? "pitcher" : "catcher";
 		
-		ASelectorService svc = null;
-		if ( mode.equals("pitcher") ) svc = new Pitcher( null, logger, props ); else 
-		if ( mode.equals("catcher") ) svc = new Catcher( null, logger, props );
-		if ( svc != null ) {
+		AbstractService srv = null;
+		if ( mode.equals("pitcher") ) srv = new Pitcher( null, logger, props ); else 
+		if ( mode.equals("catcher") ) srv = new Catcher( null, logger, props );
+		if ( srv != null ) {
+			
+			srv.setExecutor( new ScheduledThreadPoolExecutor( 2 ) );
+			
+			/*
 			svc.setProvider( new MessageProvider() {
 				public PingMessage create() {
 					return new PingMessage(); 
 				};
 			});
+			*/
 		}
 		
-		return svc;
+		return srv;
 	}
 	
 	public void run() throws Exception {

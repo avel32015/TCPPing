@@ -12,21 +12,14 @@ import ru.avel.services.helpers.Logger;
 public class ASelectorService extends AbstractService {
 
 	private Selector selector;
-	private MessageProvider provider; 
 	private long timeout = 1000;
 	
+	//private MessageProvider provider; 
+
 	private volatile boolean selecting;
 	
 	public ASelectorService(String id, Logger logger, Properties props) {
 		super(id, logger, props);
-	}
-	
-	public Context register(SelectableChannel channel, int ops) throws IOException {
-		channel.configureBlocking(false);
-		SelectionKey key = channel.register( getSelector(), ops );
-		Object obj = key.attachment();
-		Context ctx = obj instanceof Context ? (Context) obj : new Context( this, key );   
-		return ctx;
 	}
 	
 	@Override
@@ -52,6 +45,34 @@ public class ASelectorService extends AbstractService {
 		}
 	}
 	
+	@Override
+	public void stop() throws ServiceException {
+		setStatus(Status.STOPPING);
+		
+		if ( selector != null ) {
+			for ( SelectionKey key: selector.keys() ) {
+				key.cancel();
+				Context ctx = (Context) key.attachment();
+				if (ctx != null ) ctx.process( getExecutor() );
+			}
+		}
+		
+		super.stop();
+		
+		try {
+			if ( selector != null ) selector.close();
+		} catch (IOException e) { } 
+		selector = null;
+	}
+	
+	public Context register(SelectableChannel channel, int ops) throws IOException {
+		channel.configureBlocking(false);
+		SelectionKey key = channel.register( getSelector(), ops );
+		Object obj = key.attachment();
+		Context ctx = obj instanceof Context ? (Context) obj : new Context( this, key );   
+		return ctx;
+	}
+
 	public boolean isSelecting() {
 		return selecting;
 	}
@@ -75,6 +96,7 @@ public class ASelectorService extends AbstractService {
 		getLogger().logDebug("Writing message is complete");
 	}
 
+	/*
 	public MessageProvider getProvider() {
 		return provider;
 	}
@@ -82,46 +104,12 @@ public class ASelectorService extends AbstractService {
 	public void setProvider(MessageProvider provider) {
 		this.provider = provider;
 	}
+	*/
 	
 	public Selector getSelector() throws IOException {
 		if ( selector == null ) selector = Selector.open();
 		return selector;
 	}
-
-	@Override
-	public void stop() throws ServiceException {
-		setStatus(Status.STOPPING);
-		
-		if ( selector != null ) {
-			for ( SelectionKey key: selector.keys() ) {
-				key.cancel();
-				Context ctx = (Context) key.attachment();
-				if (ctx != null ) ctx.process( getExecutor() );
-			}
-		}
-		
-		/*
-		if ( executor != null ) {
-			executor.shutdown();
-			boolean term = false;
-			try {
-				term = executor.awaitTermination( 60L, TimeUnit.SECONDS );
-			} catch (InterruptedException e) {
-			}
-			if ( !term ) executor.shutdownNow(); 
-		}
-		*/
-			
-		super.stop();
-		
-		if ( selector != null ) {
-			try {
-				selector.close();
-			} catch (IOException e) { } 
-			selector = null;
-		}
-	}
-	
 
 	public long getTimeout() {
 		return timeout;

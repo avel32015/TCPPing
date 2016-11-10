@@ -9,7 +9,9 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import ru.avel.services.helpers.Logger;
 
@@ -31,13 +33,17 @@ public abstract class AbstractService implements Service {
 	@Retention(RUNTIME)
 	protected @interface Property { }
 	
+	@Property
+	private Integer TASK_DELAY = 10;
+	
 	private String id = "";
 	private Status status;
 	private Logger logger;
 	private Properties props;
-	private Thread thread;
-	private ExecutorService executor;
 	private Exception cause;
+	private ScheduledExecutorService executor;
+
+	private ServiceTask task = new ServiceTask(); 
 	
 	public AbstractService() {
 		this(null, null, null);
@@ -157,71 +163,51 @@ public abstract class AbstractService implements Service {
 		checkStatus(false, Status.STARTED);
 		setFailure(null);
 		setStatus(Status.STARTING);
-		
-		thread = new ServiceThread();
-		
+		task.start();
 		setStatus(Status.STARTED);
 	}
 
 	public void stop() throws ServiceException {
 		setStatus(Status.STOPPED);
-		
-		if (thread != null) {
-			thread.interrupt();
-			try {
-				thread.join();
-			} catch (InterruptedException e) {
-				throw new ServiceException("Service thread not joined", e);
-			}
-			thread = null;
-		}
+		task.stop();
+	}
+
+	public ScheduledExecutorService getExecutor() {
+		return executor;
+	}
+
+	public void setExecutor(ScheduledExecutorService executor) {
+		this.executor = executor;
 	}
 
 	protected abstract void process() throws ServiceException;
 	
-
-	public ExecutorService getExecutor() {
-		return executor;
-	}
-
-	public void setExecutor(ExecutorService executor) {
-		this.executor = executor;
-	}
-	
-	
-	
-	
-	
-	private class ServiceThread extends Thread {
+	private class ServiceTask implements Runnable {
 		
-		AbstractService service = AbstractService.this; 
+		Future<?> future; 
 		
-		ServiceThread() {
-			super();
-			setName("ServiceThread-" + service.getId());
-			start();
+		void start() {
+			stop();
+			future = null;
+			if ( getExecutor() == null ) logger.logWarn("Executor is undefined", null);
+			else future = getExecutor().scheduleWithFixedDelay( this, TASK_DELAY, TASK_DELAY, TimeUnit.MILLISECONDS);
 		}
-
+		
+		void stop() {
+			if ( future != null ) future.cancel(true);
+		}
+		
 		@Override
 		public void run() {
-			try {
-				while ( !isInterrupted() && service.getStatus() != Status.STOPPED ) {
-					if ( service.getStatus() == Status.STARTED ) {
-						try {
-							service.process();
-						} catch (Exception e) {
-							setFailure(e);
-							return;
-						}
-					} 
-					yield(); 
+			if ( getStatus() == Status.STOPPED ) future.cancel(false);
+			else if ( getStatus() == Status.STARTED ) {
+				try {
+					process();
+				} catch (Exception e) {
+					setFailure(e);
 				}
-			} catch(Exception e) {
-				getLogger().logError("ServiceThread exception: ", e);
 			}
 		}
-		
 	}
-
 
 }

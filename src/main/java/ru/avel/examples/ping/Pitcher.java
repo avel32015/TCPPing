@@ -5,6 +5,8 @@ import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.util.Properties;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import ru.avel.services.ASelectorService;
 import ru.avel.services.Context;
@@ -41,7 +43,7 @@ public class Pitcher extends ASelectorService {
 	private SocketChannel channel;
 	private Context context;
 	
-	private Thread sender;
+	private SenderTask sender = new SenderTask();
 	
 	
 	public Pitcher(String id, Logger logger, Properties props) {
@@ -104,12 +106,11 @@ public class Pitcher extends ASelectorService {
 			throw se;
 		}
 		super.start();
-		sender = new Sender();
 	}
 
 	@Override
 	public void stop() throws ServiceException {
-		if ( sender != null ) sender.interrupt();
+		sender.stop();
 		try {
 			super.stop();
 		} finally {
@@ -145,34 +146,36 @@ public class Pitcher extends ASelectorService {
 		return new PingMessage( size );
 	}
 	
-	private class Sender extends Thread {
+	private class SenderTask implements Runnable {
 		
-		public Sender() {
-			super("SenderThread");
+		Future<?> future;
+		int count;
+		
+		void start() {
+			stop();
+			future = null;
+			count = 0;
+			long period = mps == 0 ? 1000 : Math.round( 1000 / mps );
+			if ( getExecutor() == null ) getLogger().logWarn("Executor is undefined", null);
+			else future = getExecutor().scheduleAtFixedRate( this, 0, period, TimeUnit.MILLISECONDS);
+		}
+		
+		void stop() {
+			if ( future != null ) future.cancel(true);
 		}
 		
 		@Override
 		public void run() {
-			getLogger().logDebug("Sender started");
-			
-			long nextTime = System.currentTimeMillis();
-			long deltaTime = mps == 0 ? 1000 : Math.round( 1000 / mps );
-
-			for (int i = 0; num == 0 || i++ < num; ) {
-				Message msg = null;
-				if ( getStatus() == Status.STARTED && (msg = acquireMessage()) != null ) context.writeMessage( msg );
-				if ( isInterrupted() || getStatus() == Status.STOPPED ) break;
-				
-				long currTime = System.currentTimeMillis();
-				if ( (nextTime += deltaTime) < currTime ) nextTime = currTime; else
-				try {
-					sleep( nextTime - currTime );
-				} catch (InterruptedException e) { break; }
+			Message msg = null;
+			if ( getStatus() == Status.STOPPED ) future.cancel(false);
+			else if ( getStatus() == Status.STARTED ) {
+				if ( ( count++ < num || num == 0 ) && (msg = acquireMessage()) != null ) context.writeMessage( msg );
+				if ( 0 < num && num <= count ) {
+					future.cancel(false);
+				}
 			}
-			
-			getLogger().logDebug("Sender stopped");
 		}
-		
 	}
+	
 
 }
