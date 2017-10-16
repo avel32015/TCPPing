@@ -22,7 +22,11 @@ public class TCPPing {
 		logger = new Logger(getClass().getName(), null);
 		props = new Properties();
 		defaultProperties();
-		Runtime.getRuntime().addShutdownHook( new ShutdownHook());
+		Runtime.getRuntime().addShutdownHook( /*new ShutdownHook()*/ () -> {
+			if ( TCPPing.this.service == null ) return;
+			TCPPing.this.getLogger().logInfo("Application shutting down, please wait...");
+			TCPPing.this.end();
+		});
 	}
 	
 	public Logger getLogger() {
@@ -185,6 +189,7 @@ public class TCPPing {
 		return s;
 	}
 
+	/*
 	class ShutdownHook extends Thread {
 		@Override
 		public void run() {
@@ -192,5 +197,6 @@ public class TCPPing {
 			TCPPing.this.getLogger().logInfo("Application shutting down, please wait...");
 			TCPPing.this.end();
 		}
-	} 
+	}
+	*/
 }
